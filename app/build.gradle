@@ -35,11 +35,23 @@ android {
 		includeInApk = false
 		includeInBundle = false
 	}
+	signingConfigs {
+		release {
+			def storeFilePath = providers.gradleProperty('releaseStoreFile').orNull
+			if (storeFilePath != null) {
+				storeFile file(storeFilePath)
+				storePassword providers.gradleProperty('releaseStorePassword').orNull
+				keyAlias providers.gradleProperty('releaseKeyAlias').orNull
+				keyPassword providers.gradleProperty('releaseKeyPassword').orNull
+			}
+		}
+	}
 	buildTypes {
 		debug {
 			applicationIdSuffix = '.debug'
 		}
 		release {
+			signingConfig signingConfigs.release
 			minifyEnabled true
 			shrinkResources true
 			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

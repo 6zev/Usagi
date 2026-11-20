@@ -1,5 +1,6 @@
 package org.draken.usagi.core.exceptions
 
+import okhttp3.Headers
 import okio.IOException
 import tsuki.model.MangaSource
 
@@ -10,4 +11,6 @@ abstract class CloudFlareException(
 	abstract val url: String
 
 	abstract val source: MangaSource
+
+	open val requestHeaders: Headers = Headers.headersOf()
 }

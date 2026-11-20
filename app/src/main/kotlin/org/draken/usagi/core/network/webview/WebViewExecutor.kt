@@ -13,6 +13,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.draken.usagi.core.exceptions.CloudFlareException
 import org.draken.usagi.core.network.CommonHeaders
 import org.draken.usagi.core.network.cookies.MutableCookieJar
@@ -41,6 +42,7 @@ class WebViewExecutor
 	) {
 		private var webViewCached: WeakReference<WebView>? = null
 		private val mutex = Mutex()
+		private val challengeCoordinator = HostChallengeCoordinator()
 
 		val defaultUserAgent: String? by lazy {
 			try {
@@ -80,6 +82,16 @@ class WebViewExecutor
 		suspend fun tryResolveCaptcha(
 			exception: CloudFlareException,
 			timeout: Long,
+		): Boolean {
+			val host = exception.url.toHttpUrlOrNull()?.host ?: return false
+			return challengeCoordinator.resolve(host) {
+				resolveCaptcha(exception, timeout)
+			}
+		}
+
+		private suspend fun resolveCaptcha(
+			exception: CloudFlareException,
+			timeout: Long,
 		): Boolean =
 			mutex.withLock {
 				runCatchingCancellable {
@@ -97,7 +109,7 @@ class WebViewExecutor
 											targetUrl = exception.url,
 											continuation = cont,
 										)
-									webView.loadUrl(exception.url)
+									webView.loadUrl(exception.url, exception.requestHeaders.toMap())
 								}
 							}
 						} finally {
