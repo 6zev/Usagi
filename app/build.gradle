@@ -51,7 +51,9 @@ android {
 			applicationIdSuffix = '.debug'
 		}
 		release {
-			signingConfig signingConfigs.release
+			if (signingConfigs.release.storeFile != null) {
+				signingConfig signingConfigs.release
+			}
 			minifyEnabled true
 			shrinkResources true
 			proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
