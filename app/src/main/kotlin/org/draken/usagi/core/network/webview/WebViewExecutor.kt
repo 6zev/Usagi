@@ -167,14 +167,16 @@ class WebViewExecutor
  * and Turnstile need a real viewport (and the widget needs real coordinates) to pass.
  */
 private fun WebView.layoutOffscreen() {
-	val metrics = Resources.getSystem().displayMetrics
-	val width = metrics.widthPixels
-	val height = metrics.heightPixels
-	if (width <= 0 || height <= 0) return
-	layoutParams = ViewGroup.LayoutParams(width, height)
-	measure(
-		View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-		View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
-	)
-	layout(0, 0, width, height)
+	runCatching {
+		val metrics = Resources.getSystem().displayMetrics
+		val width = metrics.widthPixels
+		val height = metrics.heightPixels
+		if (width <= 0 || height <= 0) return
+		layoutParams = ViewGroup.LayoutParams(width, height)
+		measure(
+			View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+			View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+		)
+		layout(0, 0, width, height)
+	}
 }

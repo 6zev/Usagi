@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.draken.usagi.core.network.cookies.MutableCookieJar
+import org.draken.usagi.core.util.ext.printStackTraceDebug
 import tsuki.network.CloudFlareHelper
 import java.io.IOException
 import kotlin.coroutines.Continuation
@@ -98,36 +99,47 @@ class CaptchaContinuationClient(
 		}
 		val webView = view ?: lastView ?: return scheduleCheck(null)
 		webView.evaluateJavascript(CHALLENGE_PROBE_SCRIPT) { result ->
-			if (finished) return@evaluateJavascript
-			if (!isContinuationActive()) {
-				stop()
-				return@evaluateJavascript
-			}
-			if (clearanceChanged()) {
-				resumeContinuation(webView)
-				return@evaluateJavascript
-			}
-			val probe = parseChallengeProbe(result)
-			when {
-				probe.isPending -> {
-					if (probe.hasTurnstile && !probe.hasToken) {
-						probe.turnstileCenter?.let { center ->
-							if (turnstileClicks < MAX_TURNSTILE_CLICKS) {
-								turnstileClicks++
-								clickAt(webView, center)
-							}
+			runCatching { handleProbe(webView, result) }
+				.onFailure {
+					it.printStackTraceDebug()
+					scheduleCheck(webView)
+				}
+		}
+	}
+
+	private fun handleProbe(
+		webView: WebView,
+		result: String?,
+	) {
+		if (finished) return
+		if (!isContinuationActive()) {
+			stop()
+			return
+		}
+		if (clearanceChanged()) {
+			resumeContinuation(webView)
+			return
+		}
+		val probe = parseChallengeProbe(result)
+		when {
+			probe.isPending -> {
+				if (probe.hasTurnstile && !probe.hasToken) {
+					probe.turnstileCenter?.let { center ->
+						if (turnstileClicks < MAX_TURNSTILE_CLICKS) {
+							turnstileClicks++
+							clickAt(webView, center)
 						}
 					}
-					scheduleCheck(webView)
 				}
+				scheduleCheck(webView)
+			}
 
-				pageFinished && webView.url?.let { it.isChallengeUrl() || it.toHttpUrlOrNull() == null } == false -> {
-					resumeContinuation(webView)
-				}
+			pageFinished && webView.url?.let { it.isChallengeUrl() || it.toHttpUrlOrNull() == null } == false -> {
+				resumeContinuation(webView)
+			}
 
-				else -> {
-					scheduleCheck(webView)
-				}
+			else -> {
+				scheduleCheck(webView)
 			}
 		}
 	}

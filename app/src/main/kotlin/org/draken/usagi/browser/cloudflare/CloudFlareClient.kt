@@ -1,6 +1,8 @@
 package org.draken.usagi.browser.cloudflare
 
 import android.graphics.Bitmap
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.webkit.WebView
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.draken.usagi.browser.BrowserClient
@@ -9,10 +11,13 @@ import org.draken.usagi.core.network.webview.CHALLENGE_PROBE_SCRIPT
 import org.draken.usagi.core.network.webview.adblock.AdBlock
 import org.draken.usagi.core.network.webview.isChallengeUrl
 import org.draken.usagi.core.network.webview.parseChallengeProbe
+import org.draken.usagi.core.util.ext.printStackTraceDebug
 import tsuki.network.CloudFlareHelper
 
 private const val LOOP_COUNTER = 5
 private const val RECHECK_INTERVAL = 800L
+private const val CLICK_HOLD = 60L
+private const val MAX_TURNSTILE_CLICKS = 6
 
 class CloudFlareClient(
 	private val cookieJar: MutableCookieJar,
@@ -24,6 +29,7 @@ class CloudFlareClient(
 	private val targetHost = targetUrl.toHttpUrlOrNull()?.host?.removePrefix("www.")
 	private var counter = 0
 	private var passed = false
+	private var turnstileClicks = 0
 	private var lastWebView: WebView? = null
 	private val recheck =
 		Runnable {
@@ -47,6 +53,7 @@ class CloudFlareClient(
 	) {
 		super.onPageCommitVisible(view, url)
 		callback.onPageLoaded()
+		scheduleRecheck(view)
 	}
 
 	override fun onPageFinished(
@@ -60,6 +67,7 @@ class CloudFlareClient(
 
 	fun reset() {
 		counter = 0
+		turnstileClicks = 0
 	}
 
 	private fun checkClearance(url: String?) {
@@ -84,21 +92,55 @@ class CloudFlareClient(
 			pass()
 			return
 		}
-		val pageUrl = webView.url ?: return
-		if (pageUrl.isChallengeUrl()) return scheduleRecheck(webView)
-		val pageHost = pageUrl.toHttpUrlOrNull()?.host?.removePrefix("www.") ?: return scheduleRecheck(webView)
-		if (targetHost != null && pageHost != targetHost) return scheduleRecheck(webView)
+		val pageUrl = webView.url ?: return scheduleRecheck(webView)
+		if (!pageUrl.isChallengeUrl()) {
+			val pageHost =
+				pageUrl.toHttpUrlOrNull()?.host?.removePrefix("www.")
+					?: return scheduleRecheck(webView)
+			if (targetHost != null && pageHost != targetHost) return scheduleRecheck(webView)
+		}
 		webView.evaluateJavascript(CHALLENGE_PROBE_SCRIPT) { result ->
-			if (passed) return@evaluateJavascript
-			if (clearanceChanged()) {
-				pass()
-				return@evaluateJavascript
-			}
-			if (parseChallengeProbe(result).isPending) {
+			runCatching {
+				if (passed) return@evaluateJavascript
+				if (clearanceChanged()) {
+					pass()
+					return@evaluateJavascript
+				}
+				val probe = parseChallengeProbe(result)
+				if (probe.isPending) {
+					if (probe.hasTurnstile && !probe.hasToken && turnstileClicks < MAX_TURNSTILE_CLICKS) {
+						probe.turnstileCenter?.let { center ->
+							turnstileClicks++
+							clickAt(webView, center)
+						}
+					}
+					scheduleRecheck(webView)
+				} else {
+					pass()
+				}
+			}.onFailure {
+				it.printStackTraceDebug()
 				scheduleRecheck(webView)
-			} else {
-				pass()
 			}
+		}
+	}
+
+	/** Taps the Turnstile checkbox for the user; the WebView is on screen here, so a real tap works. */
+	private fun clickAt(
+		webView: WebView,
+		center: Pair<Int, Int>,
+	) {
+		val x = center.first.toFloat()
+		val y = center.second.toFloat()
+		val now = SystemClock.uptimeMillis()
+		val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
+		val up = MotionEvent.obtain(now, now + CLICK_HOLD, MotionEvent.ACTION_UP, x, y, 0)
+		try {
+			webView.dispatchTouchEvent(down)
+			webView.dispatchTouchEvent(up)
+		} finally {
+			down.recycle()
+			up.recycle()
 		}
 	}
 

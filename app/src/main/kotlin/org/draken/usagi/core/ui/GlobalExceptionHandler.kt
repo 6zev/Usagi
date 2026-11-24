@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Process
 import androidx.appcompat.app.AppCompatDelegate
 import org.draken.usagi.core.prefs.AppSettings
+import java.io.File
 import kotlin.system.exitProcess
 
 class GlobalExceptionHandler(
@@ -23,12 +24,20 @@ class GlobalExceptionHandler(
 		}
 		try {
 			val stackTrace = runCatching { throwable.stackTraceToString() }.getOrDefault(throwable.localizedMessage ?: "Unknown crash")
+			saveCrashTrace(stackTrace)
 			val intent = buildCrashIntent(stackTrace)
 			context.startActivity(intent)
 			Process.killProcess(Process.myPid())
 			exitProcess(10)
 		} catch (_: Throwable) {
 			defaultHandler?.uncaughtException(thread, throwable)
+		}
+	}
+
+	private fun saveCrashTrace(stackTrace: String) {
+		runCatching {
+			val dir = File(context.filesDir, "crash").apply { mkdirs() }
+			File(dir, "last-crash.txt").writeText(stackTrace)
 		}
 	}
 
