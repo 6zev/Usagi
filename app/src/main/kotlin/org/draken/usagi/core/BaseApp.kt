@@ -21,6 +21,7 @@ import org.draken.usagi.core.db.MangaDatabase
 import org.draken.usagi.core.model.PluginKeyResolver
 import org.draken.usagi.core.os.AppValidator
 import org.draken.usagi.core.parser.MangaDynamicRepository
+import org.draken.usagi.core.parser.external.ExtensionActivityTracker
 import org.draken.usagi.core.prefs.AppSettings
 import org.draken.usagi.core.ui.GlobalExceptionHandler
 import org.draken.usagi.core.util.ext.processLifecycleScope
@@ -88,6 +89,7 @@ open class BaseApp :
 		if (isCrashProcess()) return
 		GlobalExceptionHandler.install(this) { runCatching { settings }.getOrNull() }
 		super.onCreate()
+		ExtensionActivityTracker.install(this)
 		AppInfo.initialize(BuildConfig.VERSION_CODE, BuildConfig.VERSION_NAME)
 		PlatformRegistry.applicationContext = this // TODO replace with OkHttp.initialize
 		AppCompatDelegate.setDefaultNightMode(settings.theme)
