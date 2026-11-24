@@ -33,10 +33,27 @@ class CloudFlareInterceptor : Interceptor {
 			}
 
 			else -> {
-				response
+				if (response.isMitigatedChallenge()) {
+					response.closeThrowing(
+						CloudFlareProtectedException(
+							url = request.url.toString(),
+							source = request.tag(MangaSource::class.java),
+							headers = request.headers,
+						),
+					)
+				} else {
+					response
+				}
 			}
 		}
 	}
+
+	/**
+	 * Cloudflare can serve a challenge with a 200 status and mark it with `cf-mitigated`. The
+	 * helper only looks at 403/503 bodies, so those pages would otherwise reach the parser as
+	 * content.
+	 */
+	private fun Response.isMitigatedChallenge(): Boolean = code == 200 && header("cf-mitigated")?.equals("challenge", ignoreCase = true) == true
 
 	private fun Response.closeThrowing(error: IOException): Nothing {
 		try {

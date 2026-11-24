@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -147,7 +148,7 @@ class ExternalMangaRepository(
 				} catch (e: CancellationException) {
 					throw e
 				} catch (e: Throwable) {
-					throw mapException(e)
+					throw mapException(e, manga.url)
 				}
 			val details = update.manga.toManga(source, fallbackUrl = manga.url, fallbackTitle = manga.title)
 			val primary = update.chapters.asReversed().mapIndexed { i, c -> c.toMangaChapter(source, details.title, i) }
@@ -184,7 +185,7 @@ class ExternalMangaRepository(
 				} catch (e: CancellationException) {
 					throw e
 				} catch (e: Throwable) {
-					throw mapException(e)
+					throw mapException(e, chapter.url)
 				}
 			list.map { p ->
 				val res = p.imageUrl ?: (src as? HttpSource)?.getImageUrl(p) ?: p.url
@@ -211,7 +212,7 @@ class ExternalMangaRepository(
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: Throwable) {
-				throw mapException(e)
+				throw mapException(e, cp.url)
 			}
 		}
 	}
@@ -231,7 +232,7 @@ class ExternalMangaRepository(
 			} catch (e: CancellationException) {
 				throw e
 			} catch (e: Throwable) {
-				throw mapException(e)
+				throw mapException(e, cp.url)
 			}
 		}
 	}
@@ -263,10 +264,16 @@ class ExternalMangaRepository(
 		}.getOrDefault(emptyList())
 	}
 
-	private fun mapException(error: Throwable): IOException {
+	private fun mapException(
+		error: Throwable,
+		failedUrl: String? = null,
+	): IOException {
 		val http = external as? HttpSource
-		if (http != null && error.hasMsg("cloudflare bypass failed")) {
-			val url = externalSettings.browserUrl(appContext, source) ?: http.getHomeUrl()
+		if (http != null && error.isCloudFlareFailure()) {
+			val url =
+				normalizeUrl(http, failedUrl)
+					?: externalSettings.browserUrl(appContext, source)
+					?: http.getHomeUrl()
 			return CloudFlareProtectedException(url = url, source = source, headers = http.headers)
 		}
 		if (error is IOException) return error
@@ -279,6 +286,26 @@ class ExternalMangaRepository(
 			}
 		return IOException(msg, error)
 	}
+
+	private fun normalizeUrl(
+		http: HttpSource,
+		url: String?,
+	): String? {
+		if (url.isNullOrBlank()) return null
+		if (url.toHttpUrlOrNull() != null) return url
+		return http.baseUrl
+			.toHttpUrlOrNull()
+			?.resolve(url)
+			?.toString()
+	}
+
+	private fun Throwable.isCloudFlareFailure(): Boolean =
+		hasMsg("cloudflare") ||
+			hasMsg("captcha failed") ||
+			hasMsg("captcha needs interaction") ||
+			hasMsg("timed out waiting for webview") ||
+			hasMsg("turnstile") ||
+			hasMsg("verify you are human")
 
 	private fun SortOrder.isLatest() = this == SortOrder.NEWEST || this == SortOrder.UPDATED
 

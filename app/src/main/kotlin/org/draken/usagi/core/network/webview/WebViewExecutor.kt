@@ -1,7 +1,10 @@
 package org.draken.usagi.core.network.webview
 
 import android.content.Context
+import android.content.res.Resources
 import android.util.AndroidRuntimeException
+import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -12,7 +15,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.draken.usagi.core.exceptions.CloudFlareException
 import org.draken.usagi.core.network.CommonHeaders
@@ -98,11 +101,12 @@ class WebViewExecutor
 					withContext(Dispatchers.Main.immediate) {
 						val webView = obtainWebView()
 						try {
-							exception.source.getUserAgent()?.let {
+							val userAgent = exception.requestHeaders["User-Agent"] ?: exception.source.getUserAgent()
+							userAgent?.let {
 								webView.settings.userAgentString = it
 							}
-							withTimeout(timeout) {
-								suspendCancellableCoroutine { cont ->
+							withTimeoutOrNull(timeout) {
+								suspendCancellableCoroutine<Unit> { cont ->
 									webView.webViewClient =
 										CaptchaContinuationClient(
 											cookieJar = cookieJar,
@@ -111,7 +115,7 @@ class WebViewExecutor
 										)
 									webView.loadUrl(exception.url, exception.requestHeaders.toMap())
 								}
-							}
+							} != null
 						} finally {
 							webView.reset()
 						}
@@ -119,7 +123,7 @@ class WebViewExecutor
 				}.onFailure { e ->
 					exception.addSuppressed(e)
 					e.printStackTraceDebug()
-				}.isSuccess
+				}.getOrDefault(false)
 			}
 
 		private suspend fun obtainWebView(): WebView {
@@ -132,6 +136,9 @@ class WebViewExecutor
 				}
 				WebView(context).also {
 					it.configureForParser(null)
+					it.settings.useWideViewPort = false
+					it.settings.loadWithOverviewMode = false
+					it.layoutOffscreen()
 					webViewCached = WeakReference(it)
 					proxyProvider.applyWebViewConfig()
 					it.onResume()
@@ -154,3 +161,20 @@ class WebViewExecutor
 			clearHistory()
 		}
 	}
+
+/**
+ * An unattached WebView has no window, so it has no size and the page never lays out. Cloudflare
+ * and Turnstile need a real viewport (and the widget needs real coordinates) to pass.
+ */
+private fun WebView.layoutOffscreen() {
+	val metrics = Resources.getSystem().displayMetrics
+	val width = metrics.widthPixels
+	val height = metrics.heightPixels
+	if (width <= 0 || height <= 0) return
+	layoutParams = ViewGroup.LayoutParams(width, height)
+	measure(
+		View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+		View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+	)
+	layout(0, 0, width, height)
+}
